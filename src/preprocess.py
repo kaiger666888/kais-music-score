@@ -1,6 +1,6 @@
 """音乐文件预处理 — MIDI/MusicXML 解析 → 统一内部格式"""
 from typing import Optional
-from music21 import converter, note, stream, tempo, meter, key as m21key
+from music21 import converter, note, stream, tempo, meter, key as m21key, chord
 from .models import PieceInfo
 
 
@@ -54,17 +54,63 @@ def chordify(score: stream.Score) -> stream.Stream:
 
 
 def extract_melody(score: stream.Score) -> list:
-    """提取主旋律声部（音符数最多的 part）"""
+    """提取主旋律 — 支持和弦分解（取最高音）和单音旋律"""
     if not score.parts:
         return []
-    # 选音符最多的 part
-    best_part = max(score.parts, key=lambda p: len(list(p.flatten().getElementsByClass(note.Note))))
-    return list(best_part.flatten().getElementsByClass(note.Note))
+
+    # 尝试从每个 part 提取音符/和弦的最高音作为旋律
+    all_melody = []
+    for part in score.parts:
+        flat = part.flatten()
+        elements = flat.getElementsByClass([note.Note, chord.Chord])
+        for el in elements:
+            if isinstance(el, note.Note):
+                all_melody.append(el)
+            elif isinstance(el, chord.Chord):
+                # 从和弦中取最高音作为旋律音
+                if el.pitches:
+                    top_pitch = max(el.pitches, key=lambda p: p.midi)
+                    n = note.Note(top_pitch)
+                    n.quarterLength = el.quarterLength
+                    n.offset = el.offset
+                    try:
+                        n.measureNumber = el.measureNumber
+                    except Exception:
+                        pass
+                    try:
+                        n.beat = el.beat
+                    except Exception:
+                        pass
+                    all_melody.append(n)
+
+    if not all_melody:
+        # fallback: chordify and take top notes
+        ch = score.chordify()
+        for c in ch.recurse().getElementsByClass(chord.Chord):
+            if c.pitches:
+                top = max(c.pitches, key=lambda p: p.midi)
+                n = note.Note(top)
+                n.quarterLength = c.quarterLength
+                all_melody.append(n)
+
+    return all_melody
 
 
 def extract_all_notes(score: stream.Score) -> list:
-    """提取所有音符"""
-    return list(score.flatten().getElementsByClass(note.Note))
+    """提取所有音符（包括和弦分解）"""
+    notes = []
+    for part in score.parts:
+        flat = part.flatten()
+        for el in flat.getElementsByClass([note.Note, chord.Chord]):
+            if isinstance(el, note.Note):
+                notes.append(el)
+            elif isinstance(el, chord.Chord):
+                # 将和弦分解为单独的音符
+                for p in sorted(el.pitches, key=lambda p: p.midi):
+                    n = note.Note(p)
+                    n.quarterLength = el.quarterLength
+                    notes.append(n)
+    return notes
 
 
 def get_duration_seconds(score: stream.Score) -> float:
@@ -72,5 +118,4 @@ def get_duration_seconds(score: stream.Score) -> float:
     tempo_marks = [t.number for t in score.flatten().getElementsByClass(tempo.MetronomeMark) if t.number]
     bpm = tempo_marks[0] if tempo_marks else 120.0
     q = score.flatten().highestTime or 1.0
-    # quarterLength to seconds: at bpm, 1 quarter = 60/bpm seconds
     return q * 60.0 / bpm

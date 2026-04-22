@@ -4,132 +4,70 @@ from .models import (
     StructureResult, ExpressivenessResult, GenreDetection, ScoreResult,
 )
 
-# 各类型的理想特征区间
-IDEAL_RANGES = {
-    "classical": {
-        "chord_entropy": (1.5, 3.0),
-        "modulation_count": (2, 5),
-        "voice_lead": (0.5, 1.5),
-        "syncopation": (0.05, 0.15),
-        "rhythm_entropy": (1.5, 2.5),
-        "repetition": (0.4, 0.6),
-        "part_count": (3, 8),
-        "dynamic_range": (50, 127),
-        "tempo_variation": (10, 30),
-        "interval_entropy": (2.0, 3.0),
-        "contour_ratio": (0.3, 0.5),
-    },
-    "pop": {
-        "chord_entropy": (0.8, 1.5),
-        "modulation_count": (0, 1),
-        "voice_lead": (2.0, 3.0),
-        "syncopation": (0.05, 0.15),
-        "rhythm_entropy": (1.0, 2.0),
-        "repetition": (0.4, 0.6),
-        "part_count": (2, 5),
-        "dynamic_range": (30, 80),
-        "tempo_variation": (0, 5),
-        "interval_entropy": (1.0, 2.0),
-        "contour_ratio": (0.2, 0.4),
-    },
-    "jazz": {
-        "chord_entropy": (2.5, 4.0),
-        "modulation_count": (2, 8),
-        "voice_lead": (1.0, 2.0),
-        "syncopation": (0.30, 0.50),
-        "rhythm_entropy": (2.0, 3.5),
-        "repetition": (0.2, 0.4),
-        "part_count": (2, 6),
-        "dynamic_range": (30, 70),
-        "tempo_variation": (5, 20),
-        "interval_entropy": (2.5, 3.5),
-        "contour_ratio": (0.4, 0.6),
-    },
-    "electronic": {
-        "chord_entropy": (0.5, 1.5),
-        "modulation_count": (0, 1),
-        "voice_lead": (1.0, 4.0),
-        "syncopation": (0.15, 0.30),
-        "rhythm_entropy": (0.5, 1.5),
-        "repetition": (0.5, 0.8),
-        "part_count": (1, 4),
-        "dynamic_range": (20, 60),
-        "tempo_variation": (0, 3),
-        "interval_entropy": (1.0, 2.0),
-        "contour_ratio": (0.2, 0.4),
-    },
-    "rock": {
-        "chord_entropy": (0.5, 1.2),
-        "modulation_count": (0, 1),
-        "voice_lead": (2.0, 4.0),
-        "syncopation": (0.10, 0.25),
-        "rhythm_entropy": (0.8, 1.5),
-        "repetition": (0.3, 0.5),
-        "part_count": (2, 5),
-        "dynamic_range": (60, 127),
-        "tempo_variation": (3, 15),
-        "interval_entropy": (1.5, 2.5),
-        "contour_ratio": (0.3, 0.5),
-    },
-}
-
-# 类型感知评分权重
-GENRE_WEIGHTS = {
-    "classical": {"harmony": 0.30, "melody": 0.25, "rhythm": 0.15, "structure": 0.25, "expression": 0.05},
-    "pop":      {"harmony": 0.15, "melody": 0.25, "rhythm": 0.20, "structure": 0.20, "expression": 0.20},
-    "jazz":     {"harmony": 0.35, "melody": 0.25, "rhythm": 0.25, "structure": 0.10, "expression": 0.05},
-    "electronic":{"harmony": 0.10, "melody": 0.15, "rhythm": 0.20, "structure": 0.10, "expression": 0.15},
-    "rock":     {"harmony": 0.10, "melody": 0.20, "rhythm": 0.20, "structure": 0.15, "expression": 0.20},
-}
-
-GENRE_NAMES = {
-    "classical": "古典", "pop": "流行", "jazz": "爵士", "electronic": "电子", "rock": "摇滚",
-}
-
 DIM_LABELS = {
     "harmony": "和声复杂度", "melody": "旋律多样性", "rhythm": "节奏创新性",
     "structure": "结构完整性", "expression": "表现力",
 }
 
 
-def _range_match(value: float, ideal: tuple) -> float:
-    """计算值与理想区间的匹配度 [0, 1]"""
-    lo, hi = ideal
-    if lo <= value <= hi:
-        return 1.0
-    dist = min(abs(value - lo), abs(value - hi))
-    width = hi - lo if hi > lo else 1.0
-    return max(0.0, 1.0 - dist / width)
-
-
 def detect_genre(piece: PieceInfo, harmony: HarmonyResult, rhythm: RhythmResult,
                  structure: StructureResult, expressiveness: ExpressivenessResult,
                  melody: MelodyResult) -> GenreDetection:
-    """基于特征区间匹配检测音乐类型"""
-    features = {
-        "chord_entropy": harmony.chord_diversity_entropy,
-        "modulation_count": float(harmony.modulation_count),
-        "voice_lead": harmony.voice_leading_smoothness,
-        "syncopation": rhythm.syncopation_ratio,
-        "rhythm_entropy": rhythm.rhythmic_diversity_entropy,
-        "repetition": structure.repetition_coverage,
-        "part_count": float(piece.part_count),
-        "dynamic_range": float(expressiveness.dynamic_range),
-        "tempo_variation": expressiveness.tempo_variation_range,
-        "interval_entropy": melody.interval_diversity_entropy,
-        "contour_ratio": melody.contour_change_ratio,
+    """基于特征检测音乐类型 — 简化规则"""
+    scores = {
+        "classical": 0.0,
+        "pop": 0.0,
+        "jazz": 0.0,
+        "electronic": 0.0,
+        "rock": 0.0,
     }
 
-    genre_scores = {}
-    for genre, ranges in IDEAL_RANGES.items():
-        matches = [_range_match(features[k], ranges[k]) for k in features if k in ranges]
-        genre_scores[genre] = sum(matches) / len(matches) if matches else 0.0
+    # 基于和弦数量和声部数
+    chord_count = len(harmony.chord_events)
+    part_count = piece.part_count
 
-    sorted_scores = sorted(genre_scores.items(), key=lambda x: -x[1])
+    # 古典：多声部 + 有和弦变化 + 结构有段落
+    if part_count >= 2 and chord_count >= 4:
+        scores["classical"] += 3
+    if structure.detected_form in ("ABA", "AB") and chord_count >= 6:
+        scores["classical"] += 2
+
+    # 流行：单声部或双声部 + 旋律清晰 + 节奏有变化
+    if melody.score > 20 and rhythm.score > 10:
+        scores["pop"] += 2
+    if part_count <= 2 and melody.pitch_range_semitones >= 7:
+        scores["pop"] += 2
+
+    # 爵士：和弦多样性高 + 有扩展和弦
+    if harmony.chord_diversity_entropy > 1.5:
+        scores["jazz"] += 3
+    if harmony.voice_leading_smoothness < 3.0:
+        scores["jazz"] += 1
+
+    # 电子：节奏密度高 + 切分多
+    if rhythm.notes_per_second > 3:
+        scores["electronic"] += 2
+    if rhythm.syncopation_ratio > 0.2:
+        scores["electronic"] += 1
+
+    # 摇滚：力度范围大 + 节奏强
+    if expressiveness.dynamic_range > 60:
+        scores["rock"] += 2
+
+    # 默认：如果都没有明显特征，根据声部数和和弦数判断
+    if max(scores.values()) == 0:
+        if chord_count >= 4 and part_count >= 2:
+            scores["classical"] = 1
+        elif melody.score > 10:
+            scores["pop"] = 1
+        else:
+            scores["pop"] = 0.5
+
+    sorted_scores = sorted(scores.items(), key=lambda x: -x[1])
     detected = sorted_scores[0][0]
     top_score = sorted_scores[0][1]
     second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0
-    confidence = (top_score - second_score) / top_score if top_score > 0 else 0.0
+    confidence = min(1.0, (top_score - second_score) / max(top_score, 1.0)) if top_score > 0 else 0.0
 
     return GenreDetection(
         detected_genre=detected,
@@ -141,41 +79,18 @@ def detect_genre(piece: PieceInfo, harmony: HarmonyResult, rhythm: RhythmResult,
 def score_music(genre: GenreDetection, harmony: HarmonyResult, melody: MelodyResult,
                 rhythm: RhythmResult, structure: StructureResult,
                 expressiveness: ExpressivenessResult) -> ScoreResult:
-    """类型感知加权评分"""
+    """统一加权评分 — 各类型权重更均衡"""
     detected = genre.detected_genre
-    weights = GENRE_WEIGHTS.get(detected, GENRE_WEIGHTS["pop"])
-    ideal = IDEAL_RANGES.get(detected, IDEAL_RANGES["pop"])
 
-    # 各维度的原始子指标值
-    dim_values = {
-        "harmony": {
-            "chord_entropy": harmony.chord_diversity_entropy,
-            "modulation_count": float(harmony.modulation_count),
-            "voice_lead": harmony.voice_leading_smoothness,
-        },
-        "melody": {
-            "interval_entropy": melody.interval_diversity_entropy,
-            "contour_ratio": melody.contour_change_ratio,
-            "pitch_range": float(melody.pitch_range_semitones),
-        },
-        "rhythm": {
-            "rhythm_entropy": rhythm.rhythmic_diversity_entropy,
-            "syncopation": rhythm.syncopation_ratio,
-            "notes_per_second": rhythm.notes_per_second,
-        },
-        "structure": {
-            "repetition": structure.repetition_coverage,
-            "symmetry_cv": structure.phrase_symmetry_cv,
-        },
-        "expression": {
-            "dynamic_range": float(expressiveness.dynamic_range),
-            "tempo_variation": expressiveness.tempo_variation_range,
-            "articulation": float(expressiveness.articulation_types),
-        },
+    # 统一权重，不因类型差异导致好音乐被错误惩罚
+    weights = {
+        "harmony": 0.20,
+        "melody": 0.25,
+        "rhythm": 0.20,
+        "structure": 0.20,
+        "expression": 0.15,
     }
 
-    # 简化：直接使用各维度模块计算的 score
-    # 再用类型权重加权
     raw_scores = {
         "harmony": harmony.score,
         "melody": melody.score,
