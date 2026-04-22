@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Score Analysis Report</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #1a1a2e;
+  --bg-card: #16213e;
+  --text-primary: #e8e8f0;
+  --text-secondary: #a0a0b8;
+  --accent: #6c5ce7;
+  --accent-light: #a29bfe;
+  --success: #00cec9;
+  --warning: #fdcb6e;
+  --danger: #ff7675;
+  --border: #2a2a4a;
+  --shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+.header { background: linear-gradient(135deg, var(--bg-secondary), var(--bg-card)); border-radius: 16px; padding: 30px 40px; margin-bottom: 24px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+.header h1 { font-size: 28px; background: linear-gradient(135deg, var(--accent-light), var(--success)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+.header .meta { color: var(--text-secondary); font-size: 14px; display: flex; gap: 20px; flex-wrap: wrap; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+.grid-full { margin-bottom: 24px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+.card-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.card-header h2 { font-size: 18px; color: var(--accent-light); }
+.card-body { padding: 20px 24px; }
+.chart-container { width: 100%; min-height: 300px; }
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+.metric-item { background: var(--bg-secondary); border-radius: 12px; padding: 20px; text-align: center; border: 1px solid var(--border); }
+.metric-item .value { font-size: 32px; font-weight: 700; background: linear-gradient(135deg, var(--accent-light), var(--success)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.metric-item .label { font-size: 12px; color: var(--text-secondary); margin-top: 6px; text-transform: uppercase; }
+.grade-badge { display: inline-block; padding: 4px 16px; border-radius: 20px; font-size: 20px; font-weight: 700; color: #fff; }
+.grade-S { background: linear-gradient(135deg, #fdcb6e, #e17055); }
+.grade-A { background: linear-gradient(135deg, #00b894, #00cec9); }
+.grade-B { background: linear-gradient(135deg, #0984e3, #74b9ff); }
+.grade-C { background: linear-gradient(135deg, #636e72, #b2bec3); }
+.grade-D { background: linear-gradient(135deg, #d63031, #ff7675); }
+.dim-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dim-label { width: 100px; font-size: 14px; color: var(--text-secondary); }
+.dim-bar-bg { flex: 1; height: 24px; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; }
+.dim-bar { height: 100%; border-radius: 12px; background: linear-gradient(90deg, var(--accent), var(--success)); transition: width 0.5s; }
+.dim-score { width: 50px; text-align: right; font-weight: 700; font-size: 14px; }
+.genre-tag { display: inline-block; padding: 4px 12px; border-radius: 16px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>🎵 Music Score Analysis</h1>
+  <div class="meta">
+    <span>📄 {{ report.piece.source_file }}</span>
+    <span>🔑 {{ report.piece.key }}</span>
+    <span>📏 {{ report.piece.total_measures }} measures</span>
+    <span>🎼 {{ report.piece.part_count }} parts</span>
+    <span>⏱ {{ report.piece.tempo_marks[0] if report.piece.tempo_marks else "?" }} BPM</span>
+    <span>🕐 {{ generated_at }}</span>
+  </div>
+</div>
+
+{% if report.score %}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>📊 Overall Score</h2><span class="grade-badge grade-{{ report.score.grade }}">{{ report.score.grade }}</span></div>
+    <div class="card-body">
+      <div style="text-align:center;margin:20px 0;">
+        <div style="font-size:64px;font-weight:800;background:linear-gradient(135deg,var(--accent-light),var(--success));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ report.score.total }}</div>
+        <div style="color:var(--text-secondary);margin-top:8px;">/ 100</div>
+      </div>
+      {% for key, dim in report.score.dimensions.items() %}
+      <div class="dim-row">
+        <div class="dim-label">{{ dim.label }}</div>
+        <div class="dim-bar-bg"><div class="dim-bar" style="width:{{ dim.score }}%"></div></div>
+        <div class="dim-score">{{ dim.score }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>🎸 Genre Detection</h2></div>
+    <div class="card-body">
+      <div style="text-align:center;margin:20px 0;">
+        <span class="genre-tag">{{ report.genre.detected_genre }}</span>
+        <div style="color:var(--text-secondary);margin-top:12px;">Confidence: {{ "%.0f"|format(report.genre.confidence * 100) }}%</div>
+      </div>
+      {% for genre, score in report.genre.genre_scores.items() %}
+      <div class="dim-row">
+        <div class="dim-label">{{ genre }}</div>
+        <div class="dim-bar-bg"><div class="dim-bar" style="width:{{ "%.0f"|format(score * 100) }}%"></div></div>
+        <div class="dim-score">{{ "%.0f"|format(score * 100) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid-full">
+  <div class="card">
+    <div class="card-header"><h2>🕸️ Dimension Radar Chart</h2></div>
+    <div class="card-body"><div id="radar-chart" class="chart-container"></div></div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>🎼 Harmony: Chord Entropy & Root Motion</h2></div>
+    <div class="card-body"><div id="harmony-chart" class="chart-container"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>🎵 Melody: Pitch Contour</h2></div>
+    <div class="card-body"><div id="melody-chart" class="chart-container"></div></div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h2>🥁 Rhythm: Syncopation Map</h2></div>
+    <div class="card-body"><div id="rhythm-chart" class="chart-container"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>🎹 Expressiveness: Dynamics</h2></div>
+    <div class="card-body"><div id="express-chart" class="chart-container"></div></div>
+  </div>
+</div>
+
+<div class="grid-full">
+  <div class="card">
+    <div class="card-header"><h2>📊 Five-Dimension Metrics</h2></div>
+    <div class="card-body">
+      <div class="metrics-grid">
+        <div class="metric-item"><div class="value">{{ report.harmony.score }}</div><div class="label">Harmony</div></div>
+        <div class="metric-item"><div class="value">{{ report.melody.score }}</div><div class="label">Melody</div></div>
+        <div class="metric-item"><div class="value">{{ report.rhythm.score }}</div><div class="label">Rhythm</div></div>
+        <div class="metric-item"><div class="value">{{ report.structure.score }}</div><div class="label">Structure</div></div>
+        <div class="metric-item"><div class="value">{{ report.expressiveness.score }}</div><div class="label">Expression</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const DATA = {{ report_data | safe }};
+
+// Radar Chart
+(function() {
+  const dims = DATA.score ? DATA.score.dimensions : {};
+  const labels = Object.values(dims).map(d => d.label);
+  const values = Object.values(dims).map(d => d.score);
+  if (labels.length === 0) return;
+  Plotly.newPlot('radar-chart', [{
+    type: 'scatterpolar', r: values, theta: labels,
+    fill: 'toself', fillcolor: 'rgba(108,92,231,0.3)',
+    line: { color: '#a29bfe', width: 2 },
+    marker: { color: '#6c5ce7', size: 8 }
+  }], {
+    polar: { radialaxis: { visible: true, range: [0, 100], tickfont: { color: '#a0a0b8' }, gridcolor: '#2a2a4a' }, angularaxis: { tickfont: { color: '#a0a0b8' }, gridcolor: '#2a2a4a' } },
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#e8e8f0' }, margin: { t: 30, b: 30 },
+    showlegend: false
+  }, { responsive: true });
+})();
+
+// Melody Contour
+(function() {
+  const pts = DATA.melody_points || [];
+  if (pts.length === 0) return;
+  // Sample if too many points
+  const sampled = pts.length > 500 ? pts.filter((_, i) => i % Math.ceil(pts.length / 500) === 0) : pts;
+  Plotly.newPlot('melody-chart', [{
+    y: sampled.map(p => p.pitch), type: 'scatter', mode: 'lines',
+    line: { color: '#00cec9', width: 1.5 }, name: 'Melody'
+  }], {
+    yaxis: { title: 'MIDI Pitch', gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    xaxis: { gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#e8e8f0' }, margin: { t: 20, b: 40 },
+    showlegend: false
+  }, { responsive: true });
+})();
+
+// Rhythm Syncopation
+(function() {
+  const pts = DATA.rhythm_points || [];
+  if (pts.length === 0) return;
+  const sampled = pts.length > 500 ? pts.filter((_, i) => i % Math.ceil(pts.length / 500) === 0) : pts;
+  const colors = sampled.map(p => p.is_syncopated ? '#ff7675' : '#6c5ce7');
+  Plotly.newPlot('rhythm-chart', [{
+    y: sampled.map(p => p.beat_strength), type: 'scatter', mode: 'markers',
+    marker: { color: colors, size: 4 }, name: 'Beat Strength'
+  }], {
+    yaxis: { title: 'Beat Strength', gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    xaxis: { gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#e8e8f0' }, margin: { t: 20, b: 40 },
+    showlegend: false
+  }, { responsive: true });
+})();
+
+// Harmony Root Motion
+(function() {
+  const evts = DATA.harmony_events || [];
+  if (evts.length === 0) return;
+  Plotly.newPlot('harmony-chart', [{
+    y: evts.map(e => e.root), type: 'scatter', mode: 'lines+markers',
+    line: { color: '#a29bfe', width: 1.5 }, marker: { size: 4 }, name: 'Chord Root'
+  }], {
+    yaxis: { title: 'Root (MIDI)', gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    xaxis: { gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#e8e8f0' }, margin: { t: 20, b: 40 },
+    showlegend: false
+  }, { responsive: true });
+})();
+
+// Expressiveness
+(function() {
+  const expr = DATA.meta?.expressiveness || {};
+  const labels = ['Dyn Range', 'Change Freq', 'Tempo Var', 'Articulation'];
+  const vals = [
+    DATA.harmony?.dynamic_range || 0,
+    DATA.harmony?.dynamic_change_frequency || 0,
+    DATA.harmony?.tempo_variation_range || 0,
+    DATA.harmony?.articulation_types || 0
+  ];
+  Plotly.newPlot('express-chart', [{
+    type: 'bar', x: labels, y: vals,
+    marker: { color: ['#6c5ce7', '#a29bfe', '#00cec9', '#fdcb6e'] }
+  }], {
+    yaxis: { gridcolor: '#2a2a4a', tickfont: { color: '#a0a0b8' } },
+    xaxis: { tickfont: { color: '#a0a0b8' } },
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#e8e8f0' }, margin: { t: 20, b: 40 },
+    showlegend: false
+  }, { responsive: true });
+})();
+</script>
+</body>
+</html>
