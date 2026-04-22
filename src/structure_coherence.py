@@ -1,4 +1,4 @@
-"""结构完整性分析 — 基于和弦变化检测段落，区分有意义AB和无脑重复"""
+"""结构完整性分析 — 基于和弦变化+音高变化检测段落"""
 import math
 from collections import Counter
 from music21 import note, stream, chord
@@ -12,7 +12,7 @@ def analyze(score_obj) -> StructureResult:
 
     part = score_obj.parts[0]
 
-    # 提取所有音高（包括和弦分解）
+    # 提取所有音高
     all_pitches = []
     for el in part.flatten().getElementsByClass([note.Note, chord.Chord]):
         if isinstance(el, note.Note):
@@ -24,26 +24,35 @@ def analyze(score_obj) -> StructureResult:
     if len(all_pitches) < 4:
         return StructureResult()
 
+    # === 音高丰富度门控 ===
+    unique_pitches = len(set(all_pitches))
+    if unique_pitches <= 2:
+        pitch_richness_factor = 0.05
+    elif unique_pitches <= 3:
+        pitch_richness_factor = 0.2
+    elif unique_pitches <= 5:
+        pitch_richness_factor = 0.5
+    else:
+        pitch_richness_factor = 1.0
+
     # 1. 单音重复惩罚
     pitch_counter = Counter(all_pitches)
     most_common_ratio = pitch_counter.most_common(1)[0][1] / len(all_pitches)
     monotone_penalty = 1.0 if most_common_ratio > 0.9 else (0.5 if most_common_ratio > 0.7 else 0.0)
 
-    # 2. 重复模式检测（4-gram）
-    rep_coverage = 0.0
+    # 2. 音高重复模式检测（4-gram）
+    pitch_rep_coverage = 0.0
     if len(all_pitches) >= 8:
         window = 4
         patterns = [tuple(all_pitches[i:i + window]) for i in range(len(all_pitches) - window + 1)]
         pattern_counter = Counter(patterns)
-        unique_patterns = len(set(patterns))
         repeated_notes = sum(c * window for c in pattern_counter.values() if c > 1)
-        rep_coverage = repeated_notes / len(all_pitches) if all_pitches else 0.0
+        pitch_rep_coverage = repeated_notes / len(all_pitches) if all_pitches else 0.0
 
-    # 3. 段落多样性 — 基于和弦根音变化（而非小节）
+    # === 和弦进行分析（对结构检测至关重要）===
     chordified = score_obj.chordify()
     chord_events = list(chordified.recurse().getElementsByClass(chord.Chord))
 
-    # 提取和弦根音序列
     chord_roots = []
     for c in chord_events:
         try:
@@ -52,22 +61,28 @@ def analyze(score_obj) -> StructureResult:
         except Exception:
             chord_roots.append(-1)
 
-    # 将和弦序列分成段落（每4个和弦一个段落）
+    # 和弦bigram重复（和声节奏模式）
+    chord_pattern_score = 0.0
+    if len(chord_roots) >= 4:
+        chord_bigrams = [tuple(chord_roots[i:i+2]) for i in range(len(chord_roots)-1)]
+        cb_counter = Counter(chord_bigrams)
+        cb_repeated = sum(c for c in cb_counter.values() if c > 1)
+        chord_pattern_score = cb_repeated / len(chord_bigrams) if chord_bigrams else 0
+
+    # 段落多样性
     unique_sections = 1
     section_signatures = []
     if len(chord_roots) >= 2:
-        chunk_size = max(2, len(chord_roots) // 4)  # 自适应段落大小
+        chunk_size = max(2, len(chord_roots) // 4)
         chunk_size = min(chunk_size, 4)
         for i in range(0, len(chord_roots), chunk_size):
             section_signatures.append(tuple(chord_roots[i:i + chunk_size]))
         sig_counter = Counter(section_signatures)
         unique_sections = len(sig_counter)
     elif len(chord_roots) == 0:
-        # 无和弦 — 用音高变化判断
         unique_pitch_patterns = len(set(tuple(all_pitches[i:i+2]) for i in range(len(all_pitches)-1)))
         unique_sections = max(1, min(unique_pitch_patterns, 5))
 
-    # 曲式识别
     if unique_sections <= 1:
         detected_form = "AAAA"
     elif unique_sections == 2:
@@ -77,7 +92,6 @@ def analyze(score_obj) -> StructureResult:
     else:
         detected_form = f"AB... ({unique_sections} sections)"
 
-    # 段落边界
     boundaries = []
     prev_sig = None
     for i, sig in enumerate(section_signatures):
@@ -86,7 +100,6 @@ def analyze(score_obj) -> StructureResult:
         prev_sig = sig
 
     # 4. 乐句对称性
-    measures = list(part.getElementsByClass(stream.Measure)) if hasattr(part, 'getElementsByClass') else []
     rests = list(part.flatten().getElementsByClass(note.Rest))
     phrase_lengths = []
     if rests:
@@ -108,40 +121,41 @@ def analyze(score_obj) -> StructureResult:
     else:
         cv = 0.0
 
-    # 5. 发展逻辑
-    dev_score = min(rep_coverage * 100 + (1 - cv) * 30, 100) if cv <= 1 else 30
-
     # === 评分 ===
-    # 段落多样性：2-4个不同段落最好
+    # 段落多样性
     if unique_sections <= 1:
-        section_score = 10.0  # 无结构变化
+        section_score = 10.0
     elif unique_sections == 2:
-        section_score = 90.0
+        section_score = 88.0
     elif unique_sections == 3:
-        section_score = 95.0
-    elif unique_sections <= 4:
-        section_score = 85.0
+        section_score = 93.0
+    elif unique_sections <= 5:
+        section_score = 82.0
+    elif unique_sections <= 7:
+        section_score = 75.0  # 更多段落仍然合理
     else:
-        section_score = 60.0
+        section_score = 50.0
 
-    rep_norm = min(rep_coverage / 0.5, 1.0) * 80
-    sym_norm = max(0, 1.0 - cv) * 100
+    # 重复模式：同时考虑音高重复和和弦重复
+    combined_rep = max(pitch_rep_coverage, chord_pattern_score)
+    rep_norm = min(combined_rep / 0.5, 1.0) * 75
+    
+    sym_norm = max(0, 1.0 - cv) * 80
+    
+    # 发展逻辑：基于组合重复率
+    dev_score = min(combined_rep * 100 + (1 - cv) * 30, 100) if cv <= 1 else 30
 
     raw = (0.30 * section_score + 0.25 * rep_norm + 0.20 * sym_norm + 0.25 * dev_score)
+    raw -= monotone_penalty * 50
+    raw *= pitch_richness_factor
 
-    # 无脑重复惩罚
-    raw -= monotone_penalty * 60
-
-    # 稀疏惩罚 — 但只对真正稀疏的（单音重复那种），不惩罚和弦进行
     if len(all_pitches) <= 4:
         raw *= 0.3
-    elif monotone_penalty > 0:
-        raw *= 0.5
 
     score = max(0.0, min(100.0, raw))
 
     return StructureResult(
-        repetition_coverage=round(rep_coverage, 3),
+        repetition_coverage=round(combined_rep, 3),
         detected_form=detected_form,
         phrase_symmetry_cv=round(cv, 3),
         development_logic_score=round(dev_score, 1),

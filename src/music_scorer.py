@@ -82,11 +82,11 @@ def score_music(genre: GenreDetection, harmony: HarmonyResult, melody: MelodyRes
     """统一加权评分 — 各类型权重更均衡"""
     detected = genre.detected_genre
 
-    # 统一权重，不因类型差异导致好音乐被错误惩罚
+    # 权重：和声+旋律是音乐质量核心，结构和节奏辅助
     weights = {
-        "harmony": 0.20,
+        "harmony": 0.25,
         "melody": 0.25,
-        "rhythm": 0.20,
+        "rhythm": 0.15,
         "structure": 0.20,
         "expression": 0.15,
     }

@@ -1,4 +1,4 @@
-"""和声复杂度分析"""
+"""和声复杂度分析 — 多维度评估和声质量"""
 import math
 from collections import Counter
 from music21 import chord, interval, note, stream
@@ -37,7 +37,20 @@ def analyze(chordified: stream.Stream) -> HarmonyResult:
     name_counter = Counter(chord_names)
     entropy = _shannon_entropy(name_counter)
 
-    # 2. 调性变化（简单分段检测）
+    # 1b. 真实和弦比例 — 识别为三和弦/七和弦的比例
+    # music21 commonName 会对非标准"和弦"返回None或原始音名
+    real_chord_count = 0
+    for c in chord_objs:
+        cn = c.commonName
+        if cn and ('major' in cn or 'minor' in cn or 'dominant' in cn or 
+                  'diminished' in cn or 'augmented' in cn or 'half-diminished' in cn or
+                  'minor-major' in cn or 'major-seventh' in cn or 'minor-seventh' in cn or
+                  'dominant-seventh' in cn):
+            real_chord_count += 1
+    real_ratio = real_chord_count / len(chord_objs) if chord_objs else 0
+    fake_chord_penalty = (1.0 - real_ratio) * 60  # 非真实和弦多→大幅扣分
+
+    # 2. 调性变化
     mod_count = 0
     try:
         if len(chordified.parts) > 0:
@@ -60,7 +73,7 @@ def analyze(chordified: stream.Stream) -> HarmonyResult:
     except Exception:
         pass
 
-    # 3. 声部进行（相邻和弦根音半音距离）
+    # 3. 声部进行
     distances = []
     for i in range(1, len(events)):
         d = abs(events[i].root - events[i - 1].root) % 12
@@ -75,13 +88,34 @@ def analyze(chordified: stream.Stream) -> HarmonyResult:
     root_motion = {str(k): v / sum(interval_counter.values()) if interval_counter else 0
                    for k, v in sorted(interval_counter.items())}
 
-    # 评分（0-100）
-    entropy_norm = min(entropy / 4.0, 1.0) * 100
-    mod_norm = min(mod_count / 5.0, 1.0) * 100
-    vl_norm = max(0, 1.0 - vl_smoothness / 5.0) * 100
-    rm_norm = min(len(interval_counter) / 7.0, 1.0) * 100
+    # 5. 和弦数量（基础分指标）
+    chord_count = len(events)
+    
+    # 6. 和弦音程丰富度（三和弦vs七和弦vs更多）
+    chord_size_diversity = set()
+    for c in chord_objs:
+        chord_size_diversity.add(len(c.pitches))
 
-    score = 0.35 * entropy_norm + 0.25 * mod_norm + 0.25 * vl_norm + 0.15 * rm_norm
+    # === 评分 ===
+    # 基础分：有和弦变化就给基线
+    if chord_count <= 1:
+        base_score = 5.0
+    elif chord_count <= 3:
+        base_score = 15.0
+    else:
+        base_score = 25.0
+
+    entropy_norm = min(entropy / 3.5, 1.0) * 35
+    mod_norm = min(mod_count / 3.0, 1.0) * 20
+    vl_norm = max(0, 1.0 - vl_smoothness / 4.5) * 25
+    rm_norm = min(len(interval_counter) / 6.0, 1.0) * 15
+    
+    # 和弦大小多样性奖励（有3音、4音、5音和弦=好）
+    size_variety_bonus = min(len(chord_size_diversity) / 3.0, 1.0) * 10
+
+    raw = base_score + entropy_norm + mod_norm + vl_norm + rm_norm + size_variety_bonus - fake_chord_penalty
+
+    score = max(0.0, min(100.0, raw))
 
     return HarmonyResult(
         chord_diversity_entropy=round(entropy, 3),
