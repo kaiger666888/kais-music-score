@@ -134,10 +134,18 @@ def analyze(score_obj) -> StructureResult:
     elif unique_sections <= 7:
         section_score = 75.0  # 更多段落仍然合理
     else:
-        section_score = 50.0
+        section_score = 30.0 - max(0, (unique_sections - 7)) * 3
 
     # 重复模式：同时考虑音高重复和和弦重复
     combined_rep = max(pitch_rep_coverage, chord_pattern_score)
+
+    # 随机性惩罚：段落过多(>12)且重复率低=随机噪音
+    randomness_penalty = 0.0
+    if unique_sections > 12 and combined_rep < 0.15:
+        randomness_penalty = 40.0
+    elif unique_sections > 8 and combined_rep < 0.1:
+        randomness_penalty = 25.0
+
     rep_norm = min(combined_rep / 0.5, 1.0) * 75
     
     sym_norm = max(0, 1.0 - cv) * 80
@@ -147,6 +155,7 @@ def analyze(score_obj) -> StructureResult:
 
     raw = (0.30 * section_score + 0.25 * rep_norm + 0.20 * sym_norm + 0.25 * dev_score)
     raw -= monotone_penalty * 50
+    raw -= randomness_penalty
     raw *= pitch_richness_factor
 
     if len(all_pitches) <= 4:
