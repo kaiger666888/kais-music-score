@@ -99,6 +99,14 @@ def analyze(score_obj) -> StructureResult:
             boundaries.append(i)
         prev_sig = sig
 
+    # 4a. 曲子长度（用于归一化段落阈值）
+    total_measures = 1
+    try:
+        total_measures = max(1, len(list(part.getElementsByClass(stream.Measure))))
+    except Exception:
+        pass
+    sections_per_measure = unique_sections / total_measures
+
     # 4. 乐句对称性
     rests = list(part.flatten().getElementsByClass(note.Rest))
     phrase_lengths = []
@@ -134,16 +142,21 @@ def analyze(score_obj) -> StructureResult:
     elif unique_sections <= 7:
         section_score = 75.0  # 更多段落仍然合理
     else:
-        section_score = 30.0 - max(0, (unique_sections - 7)) * 3
+        # 长曲子段落多是正常的（月光的154段/101小节）
+        if sections_per_measure > 2.0:
+            section_score = max(10.0, 30.0 - (sections_per_measure - 2.0) * 10)
+        elif unique_sections > 30:
+            section_score = 25.0
+        else:
+            section_score = 30.0 - max(0, (unique_sections - 7)) * 3
 
     # 重复模式：同时考虑音高重复和和弦重复
     combined_rep = max(pitch_rep_coverage, chord_pattern_score)
 
-    # 随机性惩罚：段落过多(>12)且重复率低=随机噪音
     randomness_penalty = 0.0
-    if unique_sections > 12 and combined_rep < 0.15:
+    if sections_per_measure > 1.5 and combined_rep < 0.15:
         randomness_penalty = 40.0
-    elif unique_sections > 8 and combined_rep < 0.1:
+    elif sections_per_measure > 1.0 and combined_rep < 0.1:
         randomness_penalty = 25.0
 
     rep_norm = min(combined_rep / 0.5, 1.0) * 75

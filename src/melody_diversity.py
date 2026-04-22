@@ -175,8 +175,8 @@ def analyze(melody_notes: list) -> MelodyResult:
         range_score = 80  # 超大音域也给高分但封顶
     motif_score = min(motif_rate / 0.4, 1.0) * 100
 
-    large_leap_pen = large_leap_ratio * 80
-    extreme_pen = extreme_leap_ratio * 150
+    large_leap_pen = min(large_leap_ratio * 80, 25)   # 封顶25，避免琶音被过度惩罚
+    extreme_pen = min(extreme_leap_ratio * 150, 25)    # 封顶25，同上
     repeat_pen = same_note_penalty * 100
     sparse_pen = sparsity_penalty * 80
 
