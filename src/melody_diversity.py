@@ -94,6 +94,16 @@ def analyze(melody_notes: list) -> MelodyResult:
     elif len(pitches) <= 6:
         sparsity_penalty = 0.2
 
+    # 8. 音高多样性惩罚 — 唯一音过少=旋律贫乏
+    unique_pitches = len(set(pitches)) if pitches else 0
+    diversity_penalty = 0.0
+    if unique_pitches <= 2:
+        diversity_penalty = 2.5  # 只有1-2个音=几乎无旋律
+    elif unique_pitches <= 3:
+        diversity_penalty = 1.5
+    elif unique_pitches <= 4:
+        diversity_penalty = 0.8
+
     # === 评分 ===
     # 好旋律 = 高级进比例 + 适度小跳 + 低大跳 + 有方向变化 + 有动机重复 + 不单调重复
     step_score = min(step_ratio / 0.6, 1.0) * 100      # 级进多 → 高分
@@ -110,7 +120,7 @@ def analyze(melody_notes: list) -> MelodyResult:
 
     raw = (0.30 * step_score + 0.15 * leap_score + 0.20 * contour_score +
            0.15 * range_score + 0.20 * motif_score -
-           large_leap_penalty - extreme_penalty - repeat_penalty - sparse_penalty)
+           large_leap_penalty - extreme_penalty - repeat_penalty - sparse_penalty - diversity_penalty)
 
     # 熵指标保留用于类型检测
     interval_counter = Counter(intervals)
