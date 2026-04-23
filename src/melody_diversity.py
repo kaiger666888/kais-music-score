@@ -56,11 +56,37 @@ def analyze(melody_notes: list) -> MelodyResult:
     small_leap_count = sum(1 for iv in intervals if 3 <= abs(iv) <= 5)
     small_leap_ratio = small_leap_count / len(intervals)
 
-    # 4. 大跳惩罚
+    # 4. 大跳惩罚 — 检测结构化琶音模式，对琶音不惩罚
+    # 琶音特征：高方向交替率 + 大跳 + 间隔规律性（CV低）
+    # 随机特征：高交替率 + 大跳 + 间隔不规律（CV高）
     large_leap_count = sum(1 for iv in intervals if abs(iv) > 7)
     large_leap_ratio = large_leap_count / len(intervals)
     extreme_leap_count = sum(1 for iv in intervals if abs(iv) > 12)
     extreme_leap_ratio = extreme_leap_count / len(intervals)
+    
+    # 方向交替率
+    direction_changes = sum(1 for i in range(1, len(directions)) if directions[i] != directions[i-1])
+    alternation_rate = direction_changes / len(directions) if directions else 0
+    
+    # 间隔规律性：变异系数（CV）低 = 规律
+    abs_intervals = [abs(iv) for iv in intervals]
+    mean_iv = sum(abs_intervals) / len(abs_intervals) if abs_intervals else 0
+    if mean_iv > 0 and len(abs_intervals) > 2:
+        iv_std = math.sqrt(sum((x - mean_iv) ** 2 for x in abs_intervals) / len(abs_intervals))
+        iv_cv = iv_std / mean_iv
+    else:
+        iv_cv = 1.0
+    
+    # 琶音保护：三条件同时满足
+    is_arpeggio = (alternation_rate > 0.6 and large_leap_ratio > 0.35 and iv_cv < 0.8)
+    partial_arpeggio = (alternation_rate > 0.5 and large_leap_ratio > 0.25 and iv_cv < 0.9)
+    
+    if is_arpeggio:
+        large_leap_ratio = 0.0
+        extreme_leap_ratio = 0.0
+    elif partial_arpeggio:
+        large_leap_ratio *= 0.3
+        extreme_leap_ratio *= 0.3
 
     # 5. 轮廓变化率
     changes = sum(1 for i in range(1, len(directions)) if directions[i] != directions[i - 1])

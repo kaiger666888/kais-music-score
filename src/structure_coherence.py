@@ -166,9 +166,41 @@ def analyze(score_obj) -> StructureResult:
     # 发展逻辑：基于组合重复率
     dev_score = min(combined_rep * 100 + (1 - cv) * 30, 100) if cv <= 1 else 30
 
+    # === 循环缺乏发展惩罚 ===
+    # 使用小节级和弦根音分析（和harmony一样的聚合方法）
+    measure_root_map = {}
+    for c in chord_events:
+        try:
+            m = c.measureNumber or 0
+            r = c.root().midi % 12
+            if m not in measure_root_map:
+                measure_root_map[m] = Counter()
+            measure_root_map[m][r] += 1
+        except:
+            pass
+    
+    m_seq = [measure_root_map[m].most_common(1)[0][0] for m in sorted(measure_root_map.keys())]
+    
+    # 小节级trigram多样性
+    m_trigram_div = 1.0
+    if len(m_seq) >= 6:
+        m_trigrams = [tuple(m_seq[i:i+3]) for i in range(len(m_seq)-2)]
+        m_tg_counter = Counter(m_trigrams)
+        m_trigram_div = len(m_tg_counter) / len(m_trigrams) if m_trigrams else 1.0
+    
+    m_unique_roots = len(set(m_seq)) if m_seq else 0
+    
+    # 循环惩罚：trigram多样性低 + 根音少 = 缺乏发展
+    loop_penalty = 0.0
+    if m_trigram_div < 0.25 and m_unique_roots <= 5 and total_measures > 20:
+        loop_penalty = 20.0  # 卡农类
+    elif m_trigram_div < 0.35 and m_unique_roots <= 4 and total_measures > 15:
+        loop_penalty = 10.0
+
     raw = (0.30 * section_score + 0.25 * rep_norm + 0.20 * sym_norm + 0.25 * dev_score)
     raw -= monotone_penalty * 50
     raw -= randomness_penalty
+    raw -= loop_penalty
     raw *= pitch_richness_factor
 
     if len(all_pitches) <= 4:

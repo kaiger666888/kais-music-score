@@ -96,6 +96,73 @@ def analyze(chordified: stream.Stream) -> HarmonyResult:
     for c in chord_objs:
         chord_size_diversity.add(len(c.pitches))
 
+    # === 和弦进行质量分析 ===
+    # 策略：按小节聚合和弦，检测和弦进行模式
+    # chordify产生大量事件（每拍一个），需要按小节聚合才能看清真正的进行
+    
+    root_pitch_classes = []
+    for e in events:
+        root_pitch_classes.append(e.root % 12)
+    
+    # 按小节聚合根音（取每个小节最常见的根音）
+    measure_roots = {}  # measure -> most common root
+    for e in events:
+        m = e.measure
+        if m not in measure_roots:
+            measure_roots[m] = Counter()
+        measure_roots[m][e.root % 12] += 1
+    
+    # 提取小节级和弦根音序列
+    sorted_measures = sorted(measure_roots.keys())
+    measure_root_seq = []
+    for m in sorted_measures:
+        most_common = measure_roots[m].most_common(1)[0][0]
+        measure_root_seq.append(most_common)
+    
+    unique_roots = len(set(measure_root_seq)) if measure_root_seq else 0
+    
+    # 小节级bigram重复率
+    measure_bigram_rep = 0.0
+    if len(measure_root_seq) >= 4:
+        bigrams = [tuple(measure_root_seq[i:i+2]) for i in range(len(measure_root_seq)-1)]
+        bg_counter = Counter(bigrams)
+        bg_repeated = sum(c for c in bg_counter.values() if c > 1)
+        measure_bigram_rep = bg_repeated / len(bigrams) if bigrams else 0
+    
+    # 小节级trigram多样性
+    measure_trigram_div = 1.0
+    if len(measure_root_seq) >= 6:
+        trigrams = [tuple(measure_root_seq[i:i+3]) for i in range(len(measure_root_seq)-2)]
+        tg_counter = Counter(trigrams)
+        measure_trigram_div = len(tg_counter) / len(trigrams) if trigrams else 1.0
+    
+    # 简单进行惩罚（基于小节级分析）
+    simple_progression_penalty = 0.0
+    
+    # 检查根音集中度：如果少数几个根音占据大部分小节=简单进行
+    root_counter = Counter(measure_root_seq)
+    total_measures_count = len(measure_root_seq)
+    top_roots = root_counter.most_common(3)
+    top_roots_coverage = sum(count for _, count in top_roots) / total_measures_count if total_measures_count > 0 else 0
+    
+    # top3根音覆盖>60% = 和弦进行主要由2-3个和弦组成
+    if top_roots_coverage > 0.6:
+        simple_progression_penalty = 25.0
+    elif top_roots_coverage > 0.5:
+        simple_progression_penalty = 15.0
+    
+    # trigram多样性低 + 根音少 = 缺乏发展
+    if measure_trigram_div < 0.25 and unique_roots <= 5:
+        simple_progression_penalty = max(simple_progression_penalty, 30.0)
+    elif measure_trigram_div < 0.35 and unique_roots <= 4:
+        simple_progression_penalty = max(simple_progression_penalty, 15.0)
+    
+    # 根音太少 = 简单伴奏
+    if unique_roots <= 2:
+        simple_progression_penalty += 25.0
+    elif unique_roots <= 3:
+        simple_progression_penalty += 10.0
+
     # === 评分 ===
     # 基础分：有和弦变化就给基线
     if chord_count <= 1:
@@ -113,7 +180,7 @@ def analyze(chordified: stream.Stream) -> HarmonyResult:
     # 和弦大小多样性奖励（有3音、4音、5音和弦=好）
     size_variety_bonus = min(len(chord_size_diversity) / 3.0, 1.0) * 10
 
-    raw = base_score + entropy_norm + mod_norm + vl_norm + rm_norm + size_variety_bonus - fake_chord_penalty
+    raw = base_score + entropy_norm + mod_norm + vl_norm + rm_norm + size_variety_bonus - fake_chord_penalty - simple_progression_penalty
 
     score = max(0.0, min(100.0, raw))
 
